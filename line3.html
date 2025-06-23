@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时动画渲染自定义线条</title>
+    <style>
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+            gap: 10px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        #info {
+            font-family: sans-serif;
+            color: #555;
+        }
+        /* 隐藏用于加载的原始图片和临时的SVG元素 */
+        #brush-source, #svg-helper-container {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">正在加载笔刷图像...</div>
+    <canvas id="myCanvas" width="800" height="600"></canvas>
+    <img id="brush-source" src="brush1.png" crossOrigin="anonymous" alt="Brush Source Image">
+    <!-- 创建一个容器来存放临时的SVG元素，方便管理 -->
+    <div id="svg-helper-container"></div>
+
+
+    <script>
+        window.onload = () => {
+            const canvas = document.getElementById('myCanvas');
+            const ctx = canvas.getContext('2d');
+            const brushImage = document.getElementById('brush-source');
+            const infoDiv = document.getElementById('info');
+            
+            const animationConfig = {
+                step: 1.5, 
+                amplitude: 80,
+                speed: 800
+            };
+    
+            if (brushImage.complete && brushImage.naturalWidth !== 0) {
+                main();
+            } else {
+                brushImage.onload = main;
+                brushImage.onerror = () => {
+                    infoDiv.textContent = "错误：无法加载笔刷图片 'brush.png'。";
+                    infoDiv.style.color = 'red';
+                }
+            }
+    
+            function main() {
+                infoDiv.textContent = "实时动画渲染中 (已修复曲线间隙)...";
+                const brushSamples = preprocessBrush(brushImage);
+                if (brushSamples.length === 0) {
+                    infoDiv.textContent = "错误：笔刷图像为空或全透明。";
+                    infoDiv.style.color = 'red';
+                    return;
+                }
+    
+                const svgPathElement = createSvgPathHelper();
+                let startTime = null;
+    
+                function animate(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    const elapsedTime = timestamp - startTime;
+    
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+                    const yOffset1 = animationConfig.amplitude * Math.sin(elapsedTime / animationConfig.speed);
+                    const yOffset2 = animationConfig.amplitude * Math.cos(elapsedTime / (animationConfig.speed * 0.7));
+                    
+                    const dynamicPathData = `M 100,200 C 100,100 ${400 + yOffset2},${100 + yOffset1} 400,200 S ${700 + yOffset1},${300 - yOffset2} 700,200`;
+    
+                    svgPathElement.setAttribute('d', dynamicPathData);
+    
+                    // *** 调用新的、修复了间隙的渲染函数 ***
+                    renderBrushOnPath_Filled(ctx, svgPathElement, brushSamples, { step: animationConfig.step });
+    
+                    requestAnimationFrame(animate);
+                }
+    
+                requestAnimationFrame(animate);
+            }
+        };
+    
+        function createSvgPathHelper() {
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svgContainer = document.getElementById('svg-helper-container');
+            const svgEl = document.createElementNS(svgNS, 'svg');
+            const pathEl = document.createElementNS(svgNS, 'path');
+            svgEl.appendChild(pathEl);
+            svgContainer.appendChild(svgEl);
+            return pathEl;
+        }
+    
+        function preprocessBrush(img) {
+            const offscreenCanvas = document.createElement('canvas');
+            const offscreenCtx = offscreenCanvas.getContext('2d');
+            offscreenCanvas.width = img.width;
+            offscreenCanvas.height = img.height;
+            offscreenCtx.drawImage(img, 0, 0);
+    
+            const imageData = offscreenCtx.getImageData(0, 0, img.width, img.height);
+            const data = imageData.data;
+            const samples = [];
+            const midY = Math.floor(img.height / 2);
+    
+            for (let x = 0; x < img.width; x++) {
+                const columnSample = [];
+                for (let y = 0; y < img.height; y++) {
+                    const index = (y * img.width + x) * 4;
+                    const a = data[index + 3];
+                    if (a > 0) {
+                        columnSample.push({
+                            offset: y - midY,
+                            color: `rgba(${data[index]}, ${data[index+1]}, ${data[index+2]}, ${a / 255})`
+                        });
+                    }
+                }
+                if (columnSample.length > 0) {
+                    samples.push(columnSample);
+                }
+            }
+            return samples;
+        }
+        
+        /**
+         * @description [新] 沿SVG路径进行填充式绘制，解决曲线间隙问题
+         */
+        function renderBrushOnPath_Filled(ctx, pathEl, brushSamples, options) {
+            const { step = 1 } = options;
+            const pathLength = pathEl.getTotalLength();
+            if (pathLength === 0) return;
+    
+            let sampleIndex = 0;
+            let lastSlicePoints = null; // 用于存储上一个切片的像素坐标
+    
+            for (let d = 0; d < pathLength; d += step) {
+                const p1 = pathEl.getPointAtLength(d);
+                const p2 = pathEl.getPointAtLength(Math.min(d + 1, pathLength));
+    
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const normalAngle = angle + Math.PI / 2;
+    
+                const currentBrushColumn = brushSamples[sampleIndex % brushSamples.length];
+                sampleIndex++;
+    
+                const currentSlicePoints = [];
+                
+                // 1. 计算当前切片上所有像素点的世界坐标
+                currentBrushColumn.forEach(pixel => {
+                    const dx = Math.cos(normalAngle) * pixel.offset;
+                    const dy = Math.sin(normalAngle) * pixel.offset;
+                    currentSlicePoints.push({
+                        x: p1.x + dx,
+                        y: p1.y + dy,
+                        color: pixel.color
+                    });
+                });
+    
+                // 2. 如果存在上一个切片，则连接两个切片，填充梯形
+                if (lastSlicePoints) {
+                    for (let i = 0; i < currentSlicePoints.length - 1; i++) {
+                        const p_curr = currentSlicePoints[i];
+                        const p_curr_next = currentSlicePoints[i+1];
+                        const p_prev = lastSlicePoints[i];
+                        const p_prev_next = lastSlicePoints[i+1];
+                        
+                        // 确保我们有四个点来构成一个有效的梯形
+                        if(p_curr && p_curr_next && p_prev && p_prev_next) {
+                            ctx.fillStyle = p_curr.color; // 使用当前像素的颜色
+                            ctx.beginPath();
+                            ctx.moveTo(p_prev.x, p_prev.y);
+                            ctx.lineTo(p_curr.x, p_curr.y);
+                            ctx.lineTo(p_curr_next.x, p_curr_next.y);
+                            ctx.lineTo(p_prev_next.x, p_prev_next.y);
+                            ctx.fill();
+                        }
+                    }
+                }
+    
+                // 3. 更新 "上一个切片" 为当前切片，为下一次循环做准备
+                lastSlicePoints = currentSlicePoints;
+            }
+        }
+    </script>
+    
+</body>
+</html>

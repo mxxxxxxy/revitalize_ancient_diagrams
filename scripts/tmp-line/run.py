@@ -32,6 +32,9 @@ def extract_pixels_from_origin(origin_img_path, path_masks): #从原始图像提
         path_name_mask_dict[index] = path_name
         for mask in masks:
             x, y = mask
+            if origin_img[y, x][3] == 0:
+                # print(origin_img[y, x])
+                origin_img[y,x] = np.array([0,255,0,255])
             new_mask.putpixel((x, y), tuple(origin_img[y, x]))  # 0 为黑色
             new_mask_binary.putpixel((x, y), index)  # 0 为黑色
         index += 1

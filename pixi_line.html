@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>沿路径渲染自定义线条 (WebGL/PixiJS 高性能版)</title>
+    <style>
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden; /* 隐藏可能出现的滚动条 */
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        #brush-source {
+            display: none;
+        }
+    </style>
+    <!-- 引入 PixiJS 库 -->
+    <script src="https://pixijs.download/v8.1.5/pixi.min.js"></script>
+</head>
+<body>
+    <!-- PixiJS 会自动创建 Canvas，所以我们只需要一个容器 -->
+    <div id="canvas-container"></div>
+    <img id="brush-source" src="brush1.png" crossOrigin="anonymous" alt="Brush Source Image">
+
+    <script>
+        window.onload = () => {
+            const brushImage = document.getElementById('brush-source');
+            const svgPathData = "M 100,200 C 100,100 400,100 400,200 S 700,300 700,200";
+
+            if (brushImage.complete) {
+                mainPixi();
+            } else {
+                brushImage.onload = mainPixi;
+            }
+
+            async function mainPixi() {
+                const app = new PIXI.Application();
+                await app.init({
+                    width: 800,
+                    height: 600,
+                    backgroundColor: 0xffffff,
+                    autoDensity: true, 
+                    resolution: window.devicePixelRatio || 1,
+                });
+                document.getElementById('canvas-container').appendChild(app.canvas);
+                app.canvas.style.border = '1px solid #ccc';
+
+
+                const brushSamples = preprocessBrushForWebGL(brushImage);
+                if (brushSamples.length === 0) {
+                    console.error("笔刷图像未能加载或处理失败，无法生成笔触。");
+                    return;
+                }
+
+                const geometryData = generateBrushStrokeGeometry(svgPathData, brushSamples, { step: 1 });
+
+                const brushGeometry = new PIXI.Geometry()
+                    .addAttribute('a_position', geometryData.positions, 2)
+                    .addAttribute('a_color', geometryData.colors, 3);
+                
+                const vertexSrc = `
+                    precision mediump float;
+                    attribute vec2 a_position;
+                    attribute vec3 a_color;
+
+                    uniform mat3 translationMatrix;
+                    uniform mat3 projectionMatrix;
+
+                    varying vec3 v_color;
+
+                    void main() {
+                        v_color = a_color;
+                        gl_Position = vec4((projectionMatrix * translationMatrix * vec3(a_position, 1.0)).xy, 0.0, 1.0);
+                    }`;
+
+                const fragmentSrc = `
+                    precision mediump float;
+                    varying vec3 v_color;
+
+                    void main() {
+                        gl_FragColor = vec4(v_color, 1.0);
+                    }`;
+
+                const brushShader = PIXI.Shader.from(vertexSrc, fragmentSrc);
+
+                // --- 核心修正点在这里 ---
+                const brushMesh = new PIXI.Mesh(brushGeometry, brushShader);
+                // -------------------------
+
+                app.stage.addChild(brushMesh);
+            }
+        };
+
+        function preprocessBrushForWebGL(img) {
+            if (!img.width || !img.height) return []; // 图像未加载完成时的保护
+            const offscreenCanvas = document.createElement('canvas');
+            const offscreenCtx = offscreenCanvas.getContext('2d');
+            offscreenCanvas.width = img.width;
+            offscreenCanvas.height = img.height;
+            offscreenCtx.drawImage(img, 0, 0);
+            const imageData = offscreenCtx.getImageData(0, 0, img.width, img.height);
+            const data = imageData.data;
+            const samples = [];
+            const midY = Math.floor(img.height / 2);
+
+            for (let x = 0; x < img.width; x++) {
+                const columnSample = [];
+                for (let y = 0; y < img.height; y++) {
+                    const index = (y * img.width + x) * 4;
+                    const a = data[index + 3];
+                    if (a > 0) {
+                        columnSample.push({
+                            offset: y - midY,
+                            color: [data[index] / 255, data[index + 1] / 255, data[index + 2] / 255]
+                        });
+                    }
+                }
+                if (columnSample.length > 0) {
+                    samples.push(columnSample);
+                }
+            }
+            return samples;
+        }
+
+        function generateBrushStrokeGeometry(pathData, brushSamples, options) {
+            const { step = 1 } = options;
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svgEl = document.createElementNS(svgNS, 'svg');
+            const pathEl = document.createElementNS(svgNS, 'path');
+            pathEl.setAttribute('d', pathData);
+            svgEl.appendChild(pathEl);
+            // 确保SVG在DOM中以便计算长度，但使其不可见
+            svgEl.style.position = 'absolute';
+            svgEl.style.top = '-9999px';
+            svgEl.style.left = '-9999px';
+            document.body.appendChild(svgEl);
+
+            const pathLength = pathEl.getTotalLength();
+            let sampleIndex = 0;
+
+            const positions = [];
+            const colors = [];
+
+            for (let d = 0; d < pathLength; d += step) {
+                const p1 = pathEl.getPointAtLength(d);
+                const p2 = pathEl.getPointAtLength(d + 0.1);
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const normalAngle = angle + Math.PI / 2;
+                const currentBrushSample = brushSamples[sampleIndex % brushSamples.length];
+                sampleIndex++;
+
+                currentBrushSample.forEach(pixel => {
+                    const dx = Math.cos(normalAngle) * pixel.offset;
+                    const dy = Math.sin(normalAngle) * pixel.offset;
+                    
+                    const x = p1.x + dx;
+                    const y = p1.y + dy;
+                    const w = 1.1;
+                    const h = 1.1;
+
+                    positions.push(x, y, x + w, y, x, y + h);
+                    positions.push(x, y + h, x + w, y, x + w, y + h);
+
+                    for (let i = 0; i < 6; i++) {
+                        colors.push(...pixel.color);
+                    }
+                });
+            }
+
+            document.body.removeChild(svgEl);
+
+            return {
+                positions: new Float32Array(positions),
+                colors: new Float32Array(colors)
+            };
+        }
+    </script>
+
+</body>
+</html>

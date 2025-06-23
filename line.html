@@ -1,158 +1,197 @@
 <!DOCTYPE html>
-<html lang="zh">
-
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Mask Color Mapping Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>沿路径渲染自定义线条</title>
+    <style>
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        /* 隐藏用于加载的原始图片 */
+        #brush-source {
+            display: none;
+        }
+    </style>
 </head>
-
 <body>
-    <input type="file" id="maskInput" accept="image/png,image/bmp,image/jpeg" />
-    <div>
-        <canvas id="colorCanvas"></canvas>
-    </div>
+    <canvas id="myCanvas" width="800" height="600"></canvas>
+    <!-- 确保 crossOrigin="anonymous" 属性存在，否则无法用 getImageData -->
+    <img id="brush-source" src="brush2.png" crossOrigin="anonymous" alt="Brush Source Image">
+
     <script>
-        // 颜色映射表，可以根据你的类别自定义扩展
-        const colorMap = {
-            "0": "Vector 117",
-            "1": "Vector 139",
-            "2": "Vector 118",
-            "3": "Vector 119",
-            "4": "Vector 120",
-            "5": "Vector 121",
-            "6": "Vector 122",
-            "7": "Vector 123",
-            "8": "Vector 124",
-            "9": "Vector 129",
-            "10": "Vector 89",
-            "11": "Vector 90",
-            "12": "Vector 91",
-            "13": "Vector 92",
-            "14": "Vector 93",
-            "15": "Vector 100",
-            "16": "Vector 101",
-            "17": "Vector 102",
-            "18": "Vector 103",
-            "19": "Vector 99",
-            "20": "Vector 94",
-            "21": "Vector 95",
-            "22": "Vector 96",
-            "23": "Vector 97",
-            "24": "Vector 98",
-            "25": "Vector 104",
-            "26": "Vector 105",
-            "27": "Vector 106",
-            "28": "Vector 107",
-            "29": "Vector 108",
-            "30": "Vector 109",
-            "31": "Vector 110",
-            "32": "Vector 111",
-            "33": "Vector 112",
-            "34": "Vector 113",
-            "35": "Vector 114",
-            "36": "Vector 115",
-            "37": "Vector 116",
-            "38": "Vector 125",
-            "39": "Vector 126",
-            "40": "Vector 127",
-            "41": "Vector 128",
-            "42": "Vector 130",
-            "43": "Vector 131",
-            "44": "Vector 132",
-            "45": "Vector 133",
-            "46": "Vector 134",
-            "47": "Vector 135",
-            "48": "Vector 136",
-            "49": "Vector 137",
-            "50": "Vector 138",
-            "51": "Vector 140",
-            "52": "Vector 141",
-            "53": "Vector 142",
-            "54": "Vector 143",
-            "55": "Vector 144",
-            "56": "Vector 145",
-            "57": "Vector 146",
-            "58": "Vector 147",
-            "59": "Vector 148",
-            "60": "Vector 149",
-            "61": "Vector 150",
-            "62": "Vector 151",
-            "63": "Vector 152",
-            "64": "Vector 153",
-            "65": "Vector 154",
-            "66": "Vector 155",
-            "67": "Vector 156",
-            "68": "Vector 157",
-            "69": "Vector 158",
-            "70": "Vector 159",
-            "71": "Vector 160",
-            "72": "Vector 161",
-            "73": "Vector 162",
-            "74": "Vector 163",
-            "75": "Vector 164",
-            "76": "Vector 165",
-            "77": "Vector 166",
-            "78": "Vector 167",
-            "79": "Vector 168",
-            "80": "Vector 169",
-            "81": "Vector 170",
-            "82": "Vector 171",
-            "83": "Vector 172",
-            "84": "Vector 173",
-            "85": "Vector 174",
-            "86": "Vector 175",
-            "87": "Vector 176",
-            "88": "Vector 177",
-            "89": "Vector 178",
-            "90": "Vector 179",
-            "91": "Vector 180",
-            "92": "Vector 181",
-            "93": "Vector 182",
-            "94": "Vector 183",
-            "95": "Vector 184",
-            "96": "Vector 185",
-            "97": "Vector 186",
-            "98": "Vector 187",
-            "99": "Vector 188",
-            "100": "Vector 189",
-            "101": "Vector 190",
-            "102": "Vector 191",
-            "103": "Vector 192",
-            "104": "Vector 193",
-            "105": "Vector 194"
-        }
-        document.getElementById('maskInput').addEventListener('change', function (e) {
-            if (!e.target.files.length) return;
-            const file = e.target.files[0];
-            const img = new Image();
-            img.onload = () => drawColorMask(img);
-            img.src = URL.createObjectURL(file);
-        });
-
-        function drawColorMask(img) {
-            const canvas = document.getElementById('colorCanvas');
+        window.onload = () => {
+            const canvas = document.getElementById('myCanvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+            const brushImage = document.getElementById('brush-source');
+            // --- 新增代码开始 ---
 
-            // 获取原始ImageData
-            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imgData.data;
+            // 1. 获取设备像素比 (Device Pixel Ratio)
+            const dpr = window.devicePixelRatio || 1;
 
-            // 替换像素值：按灰度索引上色
-            for (let i = 0; i < data.length; i += 4) {
-                const gray = data[i]; // 灰度索引（假设r=g=b,取R即可）
-                const pathName = colorMap[gray] || [255, 255, 255]; // 找不到则用白色
-                data[i] = color[0];       // R
-                data[i + 1] = color[1];   // G
-                data[i + 2] = color[2];   // B
-                data[i + 3] = 255;        // Alpha
+            // 2. 定义我们期望的Canvas显示尺寸（逻辑像素）
+            const displayWidth = 800;
+            const displayHeight = 600;
+
+            // 3. 根据DPR，设置Canvas画布的实际像素数（物理像素）
+            // 这是解决模糊问题的关键，让画布的后台存储分辨率更高
+            canvas.width = displayWidth * dpr;
+            canvas.height = displayHeight * dpr;
+
+            // 4. 通过CSS将Canvas的显示尺寸设置为我们期望的大小
+            // 这会将高分辨率的画布缩放回标准的显示尺寸，从而实现高清效果
+            canvas.style.width = `${displayWidth}px`;
+            canvas.style.height = `${displayHeight}px`;
+
+            // 5. 缩放Canvas的2D上下文
+            // 这样，后续所有的绘制操作（如fillRect）都会被自动放大dpr倍
+            // 我们依然可以在800x600的坐标系里进行编程，无需关心dpr
+            ctx.scale(dpr, dpr);
+
+            // --- 新增代码结束 ---
+
+            // 你的 SVG 路径数据
+            const svgPathData = "M 100,200 C 100,100 400,100 400,200 S 700,300 700,200";
+
+            // 确保图片完全加载后再执行绘制
+            if (brushImage.complete) {
+                main();
+            } else {
+                brushImage.onload = main;
             }
-            // 放回到canvas更新显示
-            ctx.putImageData(imgData, 0, 0);
+
+            function main() {
+                // 1. 预处理笔刷图像
+                const brushSamples = preprocessBrush(brushImage);
+
+                // 如果笔刷是空的，则不执行任何操作
+                if (brushSamples.length === 0) {
+                    console.error("笔刷图像为空或全透明，无法提取样本。");
+                    return;
+                }
+
+                // 2. 沿路径绘制
+                drawOnPath(ctx, svgPathData, brushSamples, {
+                    step: 0.5 // 采样的步长，值越小线条越平滑但性能开销越大
+                });
+            }
+        };
+
+        /**
+         * @description 预处理笔刷图像，提取像素列
+         * @param {HTMLImageElement} img - 笔刷源图像
+         * @returns {Array<Array<{offset: number, color: string}>>} - 笔刷样本数组
+         */
+        function preprocessBrush(img) {
+            // 创建一个离屏 canvas 用于分析图像数据
+            const offscreenCanvas = document.createElement('canvas');
+            const offscreenCtx = offscreenCanvas.getContext('2d');
+            offscreenCanvas.width = img.width;
+            offscreenCanvas.height = img.height;
+            offscreenCtx.drawImage(img, 0, 0);
+
+            const imageData = offscreenCtx.getImageData(0, 0, img.width, img.height);
+            const data = imageData.data;
+            const samples = [];
+            const midY = Math.floor(img.height / 2); // 假设线条的中心在图片垂直中线上
+
+            // 遍历图像的每一列（宽度）
+            for (let x = 0; x < img.width; x++) {
+                const columnSample = [];
+                // 遍历该列的每一行（高度）
+                for (let y = 0; y < img.height; y++) {
+                    const index = (y * img.width + x) * 4;
+                    const r = data[index];
+                    const g = data[index + 1];
+                    const b = data[index + 2];
+                    const a = data[index + 3];
+
+                    // 只记录不透明的像素
+                    // if (a > 0) {
+                    //     columnSample.push({
+                    //         offset: y - midY, // 像素相对于中心线的偏移量
+                    //         color: `rgba(${r}, ${g}, ${b}, ${a / 255})`
+                    //     });
+                    // }
+                    columnSample.push({
+                        offset: y - midY, // 像素相对于中心线的偏移量
+                        color: `rgba(${r}, ${g}, ${b}, ${a / 255})`
+                    });
+                }
+                // 如果这一列有像素，就加入样本库
+                if (columnSample.length > 0) {
+                    samples.push(columnSample);
+                }
+            }
+            return samples;
         }
+
+        /**
+         * @description 沿着 SVG 路径绘制笔刷样本
+         * @param {CanvasRenderingContext2D} ctx - Canvas 2D 上下文
+         * @param {string} pathData - SVG 路径的 d 属性字符串
+         * @param {Array} brushSamples - 预处理好的笔刷样本
+         * @param {object} options - 配置项，如 { step: 1 }
+         */
+        function drawOnPath(ctx, pathData, brushSamples, options) {
+            const { step = 1 } = options;
+
+            // 使用 Path2D API 来处理 SVG 路径，更现代和方便
+            // 注意：Path2D 的 getPointAtLength 方法在某些非常旧的浏览器中可能不被支持
+            const path = new Path2D(pathData);
+            
+            // 为了计算路径上点的属性，我们需要一个在DOM中的SVG元素
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svgEl = document.createElementNS(svgNS, 'svg');
+            const pathEl = document.createElementNS(svgNS, 'path');
+            pathEl.setAttribute('d', pathData);
+            svgEl.appendChild(pathEl);
+            document.body.appendChild(svgEl); // 必须添加到DOM中才能使用API
+            svgEl.style.display = 'none'; // 但不需要显示它
+
+            const pathLength = pathEl.getTotalLength();
+            let sampleIndex = 0;
+
+            // 沿路径步进
+            for (let d = 0; d < pathLength; d += step) {
+                // 获取当前点和稍前一点的点，用于计算切线方向
+                const p1 = pathEl.getPointAtLength(d);
+                const p2 = pathEl.getPointAtLength(d + 0.1); // 取一个非常近的点
+
+                // 计算切线角度
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                // 法线角度 = 切线角度 + 90度
+                const normalAngle = angle + Math.PI / 2;
+
+                // 从笔刷样本库中循环选择一个样本
+                const currentBrushSample = brushSamples[sampleIndex % brushSamples.length];
+                sampleIndex++;
+
+                // 绘制这个笔刷样本（像素列）
+                currentBrushSample.forEach(pixel => {
+                    // 根据法线方向和偏移量计算每个像素的最终位置
+                    const dx = Math.cos(normalAngle) * pixel.offset;
+                    const dy = Math.sin(normalAngle) * pixel.offset;
+
+                    ctx.fillStyle = pixel.color;
+                    // 使用 fillRect 绘制一个 1x1 的像素点
+                    // 为了在高清屏上看起来更实，可以画 1.1x1.1
+                    ctx.fillRect(p1.x + dx, p1.y + dy, 1.1, 1.1);
+                });
+            }
+            // 移除临时的SVG元素
+            document.body.removeChild(svgEl);
+        }
+
     </script>
 </body>
-
 </html>

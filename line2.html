@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时动画渲染自定义线条</title>
+    <style>
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+            gap: 10px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        #info {
+            font-family: sans-serif;
+            color: #555;
+        }
+        /* 隐藏用于加载的原始图片和临时的SVG元素 */
+        #brush-source, #svg-helper-container {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">正在加载笔刷图像...</div>
+    <canvas id="myCanvas" width="800" height="600"></canvas>
+    <img id="brush-source" src="brush.png" crossOrigin="anonymous" alt="Brush Source Image">
+    <!-- 创建一个容器来存放临时的SVG元素，方便管理 -->
+    <div id="svg-helper-container"></div>
+
+
+    <script>
+        window.onload = () => {
+            const canvas = document.getElementById('myCanvas');
+            const ctx = canvas.getContext('2d');
+            const brushImage = document.getElementById('brush-source');
+            const infoDiv = document.getElementById('info');
+            
+            // 动画参数
+            const animationConfig = {
+                step: 1.5, // 增加步长可以提升性能，但会降低平滑度
+                amplitude: 80, // 摆动幅度
+                speed: 800  // 摆动速度，值越大越慢
+            };
+
+            // 确保图片完全加载后再执行
+            if (brushImage.complete && brushImage.naturalWidth !== 0) {
+                main();
+            } else {
+                brushImage.onload = main;
+                brushImage.onerror = () => {
+                    infoDiv.textContent = "错误：无法加载笔刷图片 'brush.png'。请确保文件存在且路径正确。";
+                    infoDiv.style.color = 'red';
+                }
+            }
+
+            function main() {
+                infoDiv.textContent = "实时动画渲染中...";
+
+                // 1. 预处理笔刷图像
+                const brushSamples = preprocessBrush(brushImage);
+                if (brushSamples.length === 0) {
+                    infoDiv.textContent = "错误：笔刷图像为空或全透明。";
+                    infoDiv.style.color = 'red';
+                    return;
+                }
+
+                // 2.【性能优化】创建一次性的SVG路径元素用于计算
+                const svgPathElement = createSvgPathHelper();
+
+                // 3. 启动动画循环
+                let startTime = null;
+                function animate(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    const elapsedTime = timestamp - startTime;
+
+                    // a. 清除画布
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // b. 计算当前帧的动态路径
+                    const yOffset1 = animationConfig.amplitude * Math.sin(elapsedTime / animationConfig.speed);
+                    const yOffset2 = animationConfig.amplitude * Math.cos(elapsedTime / (animationConfig.speed * 0.7)); // 使用不同频率增加变化
+                    
+                    const dynamicPathData = `M 100,200 C 100,100 ${400 + yOffset2},${100 + yOffset1} 400,200 S ${700 + yOffset1},${300 - yOffset2} 700,200`;
+
+                    // c. 更新SVG元素的路径数据
+                    svgPathElement.setAttribute('d', dynamicPathData);
+
+                    // d. 在新路径上绘制笔刷
+                    renderBrushOnPath(ctx, svgPathElement, brushSamples, { step: animationConfig.step });
+
+                    // e. 请求下一帧
+                    requestAnimationFrame(animate);
+                }
+
+                requestAnimationFrame(animate);
+            }
+        };
+
+        /**
+         * @description 创建一个用于路径计算的隐藏SVG元素，避免在循环中操作DOM
+         * @returns {SVGPathElement}
+         */
+        function createSvgPathHelper() {
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svgContainer = document.getElementById('svg-helper-container');
+            const svgEl = document.createElementNS(svgNS, 'svg');
+            const pathEl = document.createElementNS(svgNS, 'path');
+            svgEl.appendChild(pathEl);
+            svgContainer.appendChild(svgEl);
+            return pathEl;
+        }
+
+        /**
+         * @description 预处理笔刷图像 (与之前版本相同)
+         */
+        function preprocessBrush(img) {
+            const offscreenCanvas = document.createElement('canvas');
+            const offscreenCtx = offscreenCanvas.getContext('2d');
+            offscreenCanvas.width = img.width;
+            offscreenCanvas.height = img.height;
+            offscreenCtx.drawImage(img, 0, 0);
+
+            const imageData = offscreenCtx.getImageData(0, 0, img.width, img.height);
+            const data = imageData.data;
+            const samples = [];
+            const midY = Math.floor(img.height / 2);
+
+            for (let x = 0; x < img.width; x++) {
+                const columnSample = [];
+                for (let y = 0; y < img.height; y++) {
+                    const index = (y * img.width + x) * 4;
+                    const a = data[index + 3];
+                    if (a > 0) {
+                        columnSample.push({
+                            offset: y - midY,
+                            color: `rgba(${data[index]}, ${data[index+1]}, ${data[index+2]}, ${a / 255})`
+                        });
+                    }
+                }
+                if (columnSample.length > 0) {
+                    samples.push(columnSample);
+                }
+            }
+            return samples;
+        }
+        
+        /**
+         * @description 沿已有的SVG路径元素进行绘制
+         * @param {CanvasRenderingContext2D} ctx
+         * @param {SVGPathElement} pathEl - 已更新路径的SVG元素
+         * @param {Array} brushSamples
+         * @param {object} options
+         */
+        function renderBrushOnPath(ctx, pathEl, brushSamples, options) {
+            const { step = 1 } = options;
+            const pathLength = pathEl.getTotalLength();
+            let sampleIndex = 0;
+
+            for (let d = 0; d < pathLength; d += step) {
+                const p1 = pathEl.getPointAtLength(d);
+                // 稍微增加这里的距离可以稳定法线计算
+                const p2 = pathEl.getPointAtLength(Math.min(d + 1, pathLength));
+
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const normalAngle = angle + Math.PI / 2;
+
+                const currentBrushSample = brushSamples[sampleIndex % brushSamples.length];
+                sampleIndex++;
+
+                currentBrushSample.forEach(pixel => {
+                    const dx = Math.cos(normalAngle) * pixel.offset;
+                    const dy = Math.sin(normalAngle) * pixel.offset;
+                    ctx.fillStyle = pixel.color;
+                    ctx.fillRect(p1.x + dx, p1.y + dy, 1.1, 1.1);
+                });
+            }
+        }
+    </script>
+</body>
+</html>
