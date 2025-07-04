@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>沿路径像素采样示例</title>
+    <style>
+        body { font-family: sans-serif; display: flex; gap: 20px; padding: 20px; }
+        canvas { border: 1px solid #ccc; }
+        .info { max-width: 400px; }
+    </style>
+</head>
+<body>
+    <div>
+        <h3>原始图像和路径</h3>
+        <canvas id="sourceCanvas" width="400" height="300"></canvas>
+    </div>
+    <div>
+        <h3>采样结果可视化</h3>
+        <canvas id="resultCanvas" width="400" height="300"></canvas>
+    </div>
+    <div class="info">
+        <h3>说明</h3>
+        <p>左图是原始图像。我们在内存中生成了一张带有一条S型曲线的图像。</p>
+        <p>右图是可视化结果：</p>
+        <ul>
+            <li><strong>蓝色细线</strong>: 原始的SVG路径中心线。</li>
+            <li><strong>红色小点</strong>: 沿着路径每隔`sampleDistance`距离的采样中心点。</li>
+            <li><strong>左上角的像素块</strong>: 将第一个采样点采集到的像素列放大显示。</li>
+        </ul>
+        <p>请打开浏览器开发者控制台(F12)查看完整的采样数据结构。</p>
+    </div>
+
+    <script>
+        // 核心采样函数 (将上面的代码粘贴到这里)
+        async function samplePixelsAlongPath(imageUrl, pathD, options = {}) {
+            const { sampleDistance = 1, normalLength = 20 } = options;
+            const image = await new Promise(resolve => {
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.onload = () => resolve(img);
+                img.src = imageUrl;
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixelsData = imageData.data;
+            const svgPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            svgPath.setAttribute('d', pathD);
+            const totalLength = svgPath.getTotalLength();
+            const results = [];
+            for (let length = 0; length <= totalLength; length += sampleDistance) {
+                const pt = svgPath.getPointAtLength(length);
+                const epsilon = 0.1;
+                const ptBefore = svgPath.getPointAtLength(Math.max(0, length - epsilon));
+                const ptAfter = svgPath.getPointAtLength(Math.min(totalLength, length + epsilon));
+                const tangentX = ptAfter.x - ptBefore.x;
+                const tangentY = ptAfter.y - ptBefore.y;
+                const magnitude = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
+                if (magnitude === 0) continue;
+                const normalX = -tangentY / magnitude;
+                const normalY = tangentX / magnitude;
+                const pixelColumn = [];
+                const halfNormalLength = normalLength / 2;
+                for (let i = -halfNormalLength; i <= halfNormalLength; i++) {
+                    const sampleX = Math.round(pt.x + i * normalX);
+                    const sampleY = Math.round(pt.y + i * normalY);
+                    let r = 0, g = 0, b = 0, a = 0;
+                    if (sampleX >= 0 && sampleX < canvas.width && sampleY >= 0 && sampleY < canvas.height) {
+                        const index = (sampleY * canvas.width + sampleX) * 4;
+                        r = pixelsData[index];
+                        g = pixelsData[index + 1];
+                        b = pixelsData[index + 2];
+                        a = pixelsData[index + 3];
+                    }
+                    pixelColumn.push([r, g, b, a]);
+                }
+                results.push({ point: { x: pt.x, y: pt.y }, pixels: pixelColumn });
+            }
+            return results;
+        }
+
+        // --- 示例执行 ---
+        async function runExample() {
+            const sourceCanvas = document.getElementById('sourceCanvas');
+            const sourceCtx = sourceCanvas.getContext('2d');
+            const width = sourceCanvas.width;
+            const height = sourceCanvas.height;
+
+            // 1. 动态创建一张示例图片
+            // 创建渐变背景
+            const gradient = sourceCtx.createLinearGradient(0, 0, width, height);
+            gradient.addColorStop(0, '#e0f7fa');
+            gradient.addColorStop(1, '#fffde7');
+            sourceCtx.fillStyle = gradient;
+            sourceCtx.fillRect(0, 0, width, height);
+            
+            // 定义一条S型曲线的路径
+            const pathD = `M 50,150 Q 150,50 250,150 T 450,150`;
+
+            // 在Canvas上画出这条曲线，让它成为我们要采样的"线条"
+            const path2D = new Path2D(pathD);
+            sourceCtx.strokeStyle = 'rgba(255, 0, 150, 0.8)'; // 粉红色、粗线条
+            sourceCtx.lineWidth = 15; // 这是线条的视觉宽度
+            sourceCtx.lineCap = 'round';
+            sourceCtx.stroke(path2D);
+
+            // 2. 调用采样函数
+            const imageUrl = sourceCanvas.toDataURL();
+            const sampleOptions = {
+                sampleDistance: 5,   // 每隔5像素采一个点
+                normalLength: 30     // 采样列的像素长度为30
+            };
+            const sampledData = await samplePixelsAlongPath(imageUrl, pathD, sampleOptions);
+
+            console.log("采样完成，数据如下:", sampledData);
+
+            // 3. 可视化结果
+            visualizeResults(sampledData, pathD, sampleOptions.normalLength);
+        }
+
+        function visualizeResults(data, pathD, normalLength) {
+            const resultCanvas = document.getElementById('resultCanvas');
+            const resultCtx = resultCanvas.getContext('2d');
+            resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
+            resultCtx.fillStyle = '#f0f0f0';
+            resultCtx.fillRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+
+            // 绘制原始路径
+            const path2D = new Path2D(pathD);
+            resultCtx.strokeStyle = 'blue';
+            resultCtx.lineWidth = 1;
+            resultCtx.stroke(path2D);
+
+            // 绘制采样中心点
+            resultCtx.fillStyle = 'red';
+            data.forEach(sample => {
+                resultCtx.beginPath();
+                resultCtx.arc(sample.point.x, sample.point.y, 2, 0, 2 * Math.PI);
+                resultCtx.fill();
+            });
+
+            // 将第一个采样点的像素列放大显示在左上角
+            if (data.length > 0) {
+                const firstColumn = data[0].pixels;
+                const pixelSize = 5; // 每个像素放大到5x5
+                firstColumn.forEach((pixel, index) => {
+                    const [r, g, b, a] = pixel;
+                    resultCtx.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
+                    resultCtx.fillRect(10, 10 + index * pixelSize, pixelSize, pixelSize);
+                });
+                resultCtx.strokeStyle = 'black';
+                resultCtx.lineWidth = 1;
+                resultCtx.strokeRect(10, 10, pixelSize, firstColumn.length * pixelSize);
+            }
+        }
+
+        runExample();
+    </script>
+</body>
+</html>

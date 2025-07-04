@@ -2,7 +2,7 @@
 // import { RouterLink, RouterView } from 'vue-router'
 import TreeView from '@/components/Tree.vue'
 import NodeView from '@/components/Nodelink.vue'
-import { onMounted, ref } from 'vue';
+import { ref } from 'vue'
 
 const mode = ref('ancient')
 const mode2 = ref('ancient')
@@ -21,13 +21,13 @@ const mode2 = ref('ancient')
 
 <style scoped>
 .btn {
-    cursor: pointer;
-    border: 1px solid black;
-    width: 80px;
-    height: 30px;
-    justify-content: center;
-    align-items: center;
-    border-radius: 5px;
-    display: flex;
+  cursor: pointer;
+  border: 1px solid black;
+  width: 80px;
+  height: 30px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 5px;
+  display: flex;
 }
 </style>

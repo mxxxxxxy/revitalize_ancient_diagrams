@@ -7,8 +7,10 @@
 <script setup>
 import { ref, onMounted, watch, computed, useTemplateRef, watchEffect } from 'vue';
 import { calculateImageSize, loadImg } from '@/utils/image.js';
+import { PathSampler } from '@/render/sample.js'
 var links, nodes;
 var imgSize;
+var animations = {};
 var stage;
 var layer;
 var render = false;
@@ -16,6 +18,7 @@ var initSize = [0, 0]; // 原始背景图像 [宽,高]
 var simulation = null;
 var dragActive;
 var linkForce;
+var sampler;
 const padding = {
 	top: 0.1,
 	bottom: 0.1,
@@ -23,9 +26,15 @@ const padding = {
 	right: 0.05
 }
 const canvas = useTemplateRef('canvas');
-
+var line = d3.line()
+	.x((d) => d[0])
+	.y((d) => d[1]);
 const width = ref(400);
 const height = ref(0);
+
+const xRatio = ref(1);
+const yRatio = ref(1);
+
 const props = defineProps(['mode', 'data', 'width']);
 const figSize = computed(() => {
 	return {
@@ -34,33 +43,29 @@ const figSize = computed(() => {
 	}
 })
 
-// const link_generator = (link) => {
-// 	const source = link.source;
-// 	const target = link.target;
-// 	console.log(source, target)
-// 	return 
-// }
-
 // -----初始化-----
 // 根据绘制大小重新计算node和link位置
 // 下划线开头的为当前绘制大小下的坐标
 function resize(originalSize, currentSize, nodes, links) {
-	let xRatio = currentSize[0] / originalSize[0];
-	let yRatio = currentSize[1] / originalSize[1];
+	xRatio.value = currentSize[0] / originalSize[0];
+	yRatio.value = currentSize[1] / originalSize[1];
 	nodes.forEach(node => {
 		node._position = [[0, 0], [0, 0]]
-		node._position[0][0] = node.position[0][0] * xRatio
-		node._position[1][0] = node.position[1][0] * xRatio
-		node._position[0][1] = node.position[0][1] * xRatio
-		node._position[1][1] = node.position[1][1] * yRatio
+		node._position[0][0] = node.position[0][0] * xRatio.value
+		node._position[1][0] = node.position[1][0] * xRatio.value
+		node._position[0][1] = node.position[0][1] * xRatio.value
+		node._position[1][1] = node.position[1][1] * yRatio.value
 	})
+	// links.forEach(link => {
+	// 	link._sourcePosition = [link.sourcePosition[0] * xRatio, link.sourcePosition[1] * yRatio]
+	// 	link._targetPosition = [link.targetPosition[0] * xRatio, link.targetPosition[1] * yRatio]
+	// })
 	links.forEach(link => {
-		link._sourcePosition = [link.sourcePosition[0] * xRatio, link.sourcePosition[1] * yRatio]
-		link._targetPosition = [link.targetPosition[0] * xRatio, link.targetPosition[1] * yRatio]
+		link._sourcePosition = [link.sourcePosition[0], link.sourcePosition[1]]
+		link._targetPosition = [link.targetPosition[0], link.targetPosition[1]]
 	})
 	return nodes, links;
 }
-
 
 
 async function createCanvas() {
@@ -88,6 +93,7 @@ async function createCanvas() {
 		// opacity: 0,
 	});
 	layer.add(background);
+
 
 	var nodeGroup = new Konva.Group({
 		x: 0,//位置坐标
@@ -176,19 +182,41 @@ async function createCanvas() {
 		});
 	})
 
-	links.forEach(_link => {
-		_link.initalLink = [_link._sourcePosition[0], _link._sourcePosition[1], _link._targetPosition[0], _link._targetPosition[1]]
-		let linkNode = new Konva.Line({
-			points: _link.initalLink,
-			stroke: '#000000',
-			fill: null,
-			zindex: 2,
-			name: 'link',
-			id: _link.name,
-		});
-		_link.linkNode = linkNode;
-		linkGroup.add(linkNode);
+	sampler = new PathSampler(maskImg, {
+		width: width.value
 	})
+
+	links.forEach(link => {
+		link.initalLink = [link._sourcePosition, link._targetPosition];
+		const d = link.path
+		const id = link.name
+		sampler.samplePath(id, d);
+		sampler.render(id, d);
+		link.bbox = sampler.outputBBox;
+		animations[id] = [
+			Math.round(link.bbox.x),
+			Math.round(link.bbox.y),
+			Math.round(link.bbox.width),
+			Math.round(link.bbox.height)
+		];
+		const sprite = new Konva.Sprite({
+			// 关键：所有 sprite 都共享同一个源 canvas 和 animations 对象
+			image: sampler.resultCanvas,
+			animations: animations,
+
+			// 关键：指定当前 sprite 显示哪一个“动画”（帧）
+			animation: id,
+
+			// 关键：将 sprite 放置在它在源 canvas 上的原始位置
+			x: Math.round(link.bbox.x),
+			y: Math.round(link.bbox.y),
+
+			draggable: false,
+		});
+		link.sprite = sprite;
+		layer.add(sprite);
+	});
+
 	layer.batchDraw();
 }
 
@@ -205,38 +233,38 @@ const runSimulation = () => {
 	simulation = d3.forceSimulation(nodes)
 		.force("linkForce", linkForce)
 		.force("charge", d3.forceManyBody().strength(-50))
-		.force("collide", d3.forceCollide(()=>20))
+		.force("collide", d3.forceCollide(() => 20))
 		.force("x", d3.forceX(width.value / 2).strength(0.08))
 		.force("y", d3.forceY(height.value / 2).strength(0.08))
 		.on("tick", () => {
 			nodes.forEach(n => {
-				// n.dx = n.x - n.lastX;
-				// n.dy = n.y - n.lastY;
-				// console.log(n.dx, n.dy)
-				// if (!n.last_fx) {
-				// 	n.last_fx = n.fx;
-				// 	n.last_fy = n.fy;
-				// }
-				// if (n.fx) {
-				// 	n.dx = n.fx - n.last_fx;
-				// 	n.dy = n.fy - n.last_fy;
-				// 	n.last_fx = n.fx;
-				// 	n.last_fy = n.fy;
-				// }
-				// n.konvaNode.x(n.lastX + n.dx);
-				// n.konvaNode.y(n.lastY + n.dy);
 				n.konvaNode.x(n.x);
 				n.konvaNode.y(n.y);
 				n.dx = n.x - n.initalX;
 				n.dy = n.y - n.initalY;
 			})
+			sampler.clear()
 			links.forEach(l => {
-				let _ = Array.from(l.initalLink)
-				_[0] += l.source.dx;
-				_[1] += l.source.dy;
-				_[2] += l.target.dx;
-				_[3] += l.target.dy;
-				l.linkNode.points(_);
+				// canvas
+				let _ = [[0, 0], [0, 0]]
+				_[0][0] = l.initalLink[0][0] + l.source.dx / xRatio.value;
+				_[0][1] = l.initalLink[0][1] + l.source.dy / yRatio.value;
+				_[1][0] = l.initalLink[1][0] + l.target.dx / xRatio.value;
+				_[1][1] = l.initalLink[1][1] + l.target.dy / yRatio.value;
+				sampler.render(l.name, line(_));
+				l.bbox = sampler.outputBBox;
+				animations[l.name] = [
+					Math.round(l.bbox.x),
+					Math.round(l.bbox.y),
+					Math.round(l.bbox.width),
+					Math.round(l.bbox.height)
+				];
+				l.sprite.setAttrs({
+					animations: animations,
+					animation: l.name,
+					x: Math.round(l.bbox.x),
+					y: Math.round(l.bbox.y),
+				})
 			})
 			layer.batchDraw();
 		});
@@ -251,13 +279,14 @@ watchEffect(() => {
 
 onMounted(async () => {
 	width.value = props.width;
-	links = await d3.json(`/src/assets/${props.data}/link.json`)
+	links = await d3.json(`/src/assets/${props.data}/link.json`);
 	nodes = await d3.json(`/src/assets/${props.data}/node.json`);
 	imgSize = await calculateImageSize(`/src/assets/${props.data}/img.jpeg`, width.value);
 	initSize[0] = imgSize.originalWidth; // 原始背景图像宽
 	initSize[1] = imgSize.originalHeight; // 原始背景图像高
 	height.value = imgSize.newHeight;
 	nodes, links = resize(initSize, [width.value, height.value], nodes, links);
+	
 	setSimulation(); // 会改变node和link 非纯func
 	createCanvas();
 })

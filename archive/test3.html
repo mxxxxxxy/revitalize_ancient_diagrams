@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <!-- <script src="/src/render/sample.js" type="module"></script> -->
+    <script src="https://unpkg.com/konva@9.3.6/konva.min.js"></script>
+</head>
+
+<body>
+    <div id="konvaContainer" style="border: 1px solid red;"></div>
+    <script type="module">
+        import { PathSampler } from '/src/render/sample.js'
+        const sampler = new PathSampler('/scripts/tmp-line/mask.png');
+
+        fetch('/scripts/tmp-line/link.json')
+            .then((response) => response.json())
+            .then((links) => {
+                setTimeout(() => {
+                    const stage = new Konva.Stage({
+                        container: 'konvaContainer', // 关联到 div 容器
+                        width: window.innerWidth,
+                        height: window.innerHeight,
+                    });
+                    const layer = new Konva.Layer();
+                    stage.add(layer);
+                    let spritesData = []
+                    links.forEach(link => {
+                        const d = link.path
+                        const id = link.name
+                        sampler.samplePath(id, d);
+                        sampler.render(id, d);
+                        spritesData.push(sampler.outputBBox)
+                        // -------------
+                        // const { imageCanvas: sampledImage, imageBBox: position } = sampler.getRenderImage()
+                        // // console.log(position, sampledImage)
+
+                        // // --- 步骤 2: 创建一个 Konva.Image 对象 ---
+                        // // 这是最关键的一步
+                        // const konvaImage = new Konva.Image({
+                        //     image: sampledImage, // ✨ 将源 Canvas 元素直接作为 image 属性的值
+                        //     x: position.x,
+                        //     y: position.y,
+                        //     width: sampledImage.width,   // 可以设置尺寸
+                        //     height: sampledImage.height,
+                        //     draggable: true, // 让这个图像可以在 Konva 画布上拖动
+                        //     // stroke: 'green', // 还可以给它加边框等效果
+                        //     // strokeWidth: 2,
+                        // });
+                        // sampler.clear();
+                        // -------------
+                        // --- 步骤 3: 将 Konva.Image 添加到图层并绘制 ---
+                        // layer.add(konvaImage);
+                    });
+
+                    const animations = {};
+                    spritesData.forEach((bbox, i) => {
+                        animations['line' + i] = [
+                            Math.round(bbox.x),
+                            Math.round(bbox.y),
+                            Math.round(bbox.width),
+                            Math.round(bbox.height)
+                        ];
+                    });
+                    spritesData.forEach((bbox, i) => {
+                        console.log(bbox)
+                        const sprite = new Konva.Sprite({
+                            // 关键：所有 sprite 都共享同一个源 canvas 和 animations 对象
+                            image: sampler.resultCanvas,
+                            animations: animations,
+
+                            // 关键：指定当前 sprite 显示哪一个“动画”（帧）
+                            animation: 'line' + i,
+
+                            // 关键：将 sprite 放置在它在源 canvas 上的原始位置
+                            x: Math.round(bbox.x),
+                            y: Math.round(bbox.y),
+
+                            draggable: true,
+                        });
+                        layer.add(sprite);
+                    })
+                    layer.draw(); // 或者 stage.draw()
+                }, 1000)
+            });
+
+    </script>
+</body>
+
+</html>

@@ -176,7 +176,7 @@ function unifyCloseNumbers(array, threshold) {
     return result;
 }
 
-function get_elbow_path(d) {
+function get_elbow_path({ d } = {}) {
     let local_ctrl_points;
     local_ctrl_points = [
         [d.source.x, d.source.y],
@@ -188,7 +188,7 @@ function get_elbow_path(d) {
 }
 
 // 现代layout下link重叠在node上，需要根据node大小修改link的起始和终点
-function adjustLinkToAvoidOverlap(path, sourceNode, targetNode){
+function adjustLinkToAvoidOverlap(path, sourceNode, targetNode) {
     const pathCommands = pathCommandsFromString(path);
     pathCommands[0].y += sourceNode.data._position[1][1] / 2;
     pathCommands.at(-1).y -= targetNode.data._position[1][1] / 2;

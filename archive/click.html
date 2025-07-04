@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script src="https://unpkg.com/svg-path-bbox@1.0.2/dist/svg-path-bbox.es.js"></script>
+</head>
+<body>
+  <div id="container"></div>
+  <script type="module">
+    import { svgPathBbox } from 'svg-path-bbox';
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    const stage = new Konva.Stage({
+      container: 'container',
+      width: width,
+      height: height,
+    });
+
+    const layer = new Konva.Layer();
+    stage.add(layer);
+
+    function createImageDataForPath(pathData, color) {
+        return new Promise((resolve) => {
+            const bbox = svgPathBbox(pathData);
+            const pathWidth = bbox[2] - bbox[0];
+            const pathHeight = bbox[3] - bbox[1];
+
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = Math.ceil(pathWidth);
+            offscreenCanvas.height = Math.ceil(pathHeight);
+            const ctx = offscreenCanvas.getContext('2d');
+
+            ctx.translate(-bbox[0], -bbox[1]);
+            ctx.fillStyle = color;
+            const p = new Path2D(pathData);
+            ctx.fill(p);
+            
+            // 我们现在只需要离屏 canvas 本身和 bbox
+            resolve({ image: offscreenCanvas, bbox });
+        });
+    }
+
+    // --- 创建第一个形状 (星形) ---
+    const starPath = "M100,10 L40,198 L190,78 L10,78 L160,198 Z";
+    createImageDataForPath(starPath, 'blue').then(({ image, bbox }) => {
+        const starImage = new Konva.Image({
+            x: bbox[0],
+            y: bbox[1],
+            image: image, // image 是我们的 offscreenCanvas
+            draggable: true,
+        });
+
+        // ===================================
+        // =====  这是修正后的 hitFunc  =====
+        // ===================================
+        starImage.hitFunc(function (context) {
+            // "this" 在这里指向 starImage 节点本身
+            // this.image() 返回的是我们设置的 offscreenCanvas
+            context.drawImage(this.image(), 0, 0);
+            
+            // 告诉 Konva 使用我们刚刚绘制的内容作为命中区域
+            context.fillStrokeShape(this); 
+        });
+
+        starImage.on('click', () => {
+            console.log('Clicked on the BLUE STAR!');
+        });
+        
+        layer.add(starImage);
+        layer.draw(); // 异步创建后需要重绘
+    });
+
+
+    // --- 创建第二个形状 (圆形) ---
+    const circlePath = "M200,150 a50,50 0 1,0 100,0 a50,50 0 1,0 -100,0";
+    createImageDataForPath(circlePath, 'red').then(({ image, bbox }) => {
+        const circleImage = new Konva.Image({
+            x: bbox[0],
+            y: bbox[1],
+            image: image,
+            draggable: true,
+            opacity: 0.8
+        });
+
+        // ===================================
+        // =====  为圆形也设置修正后的 hitFunc  =====
+        // ===================================
+        circleImage.hitFunc(function (context) {
+            context.drawImage(this.image(), 0, 0);
+            context.fillStrokeShape(this);
+        });
+        
+        circleImage.on('click', () => {
+            console.log('Clicked on the RED CIRCLE!');
+        });
+
+        layer.add(circleImage);
+        layer.draw(); // 异步创建后需要重绘
+    });
+
+  </script>
+</body>
+</html>

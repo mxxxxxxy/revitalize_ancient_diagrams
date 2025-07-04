@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Pixi.js 离屏渲染并提取像素</title>
+    <!-- 引入 PixiJS 库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
+    <style>
+        body {
+            background-color: #333;
+            color: #eee;
+            font-family: sans-serif;
+        }
+
+        canvas {
+            display: none;
+        }
+
+        /* 我们不需要显示canvas，所以隐藏它 */
+    </style>
+</head>
+
+<body>
+    <h1>Pixi.js 离屏渲染：10x10 -> 20x10 数组</h1>
+    <p>结果已输出到浏览器控制台。</p>
+
+    <script>
+        (async () => {
+            // 1. 初始化 Pixi 应用
+            // 因为我们不需要显示，所以可以不设置宽高，也不添加到DOM中
+            const app = new PIXI.Application({
+                width: 1, height: 1, // 尺寸不重要，因为我们不向主屏幕渲染
+                autoStart: false, // 不需要动画循环
+            });
+            // await app.init({
+            //     width: 1, height: 1, // 尺寸不重要，因为我们不向主屏幕渲染
+            //     autoStart: false, // 不需要动画循环
+            // });
+
+            // 2. 创建原始数据 (10x10)
+            const originalWidth = 10, originalHeight = 10;
+            const originalPixelData = new Uint8ClampedArray(originalWidth * originalHeight * 4);
+            for (let x = 0; x < originalWidth; ++x) {
+                const intensity = Math.round(x / (originalWidth - 1) * 255);
+                for (let y = 0; y < originalHeight; ++y) {
+                    const i = (y * originalWidth + x) * 4;
+                    originalPixelData[i] = intensity;     // R
+                    originalPixelData[i + 1] = 0;           // G
+                    originalPixelData[i + 2] = 0;           // B
+                    originalPixelData[i + 3] = 255;         // A
+                }
+            }
+
+            // 3. 从原始数据创建源纹理 (Source Texture)
+            // 这一步将数据上传到GPU
+            const sourceTexture = PIXI.Texture.fromBuffer(originalPixelData, originalWidth, originalHeight, {
+                // 关键：设置插值模式为线性，这样缩放时才会进行颜色插值
+                scaleMode: PIXI.SCALE_MODES.LINEAR,
+            });
+
+            // 4. 创建一个使用该纹理的精灵 (Sprite)，并设置其目标尺寸
+            const scaledSprite = new PIXI.Sprite(sourceTexture);
+            scaledSprite.width = 20;
+            scaledSprite.height = 10;
+
+            // 5. 创建一个渲染纹理 (RenderTexture) 作为我们的离屏渲染目标
+            // 它的尺寸就是我们期望的输出数组的尺寸
+            const outputWidth = 20, outputHeight = 10;
+            const renderTexture = PIXI.RenderTexture.create({
+                width: outputWidth,
+                height: outputHeight,
+            });
+
+            // 6. 【核心步骤】执行渲染
+            // 将缩放后的精灵(scaledSprite)渲染到我们的离屏渲染纹理(renderTexture)上
+            // 这一步，GPU会完成从10列到20列的线性插值计算
+            app.renderer.render(scaledSprite, { renderTexture: renderTexture });
+
+            // 7. 【核心步骤】从渲染纹理中提取像素数据
+            // 这会将GPU计算好的结果回读到CPU内存中
+            const outputPixels = await app.renderer.extract.pixels(renderTexture);
+            // 注意: extract.pixels 返回的是 Uint8Array，它和 Uint8ClampedArray 功能几乎一样，
+            // 都是8位无符号整数数组。
+
+            // 8. 验证结果
+            console.log('成功提取像素数据！');
+            console.log('输出数组类型:', outputPixels.constructor.name); // Uint8Array
+            console.log('输出数组长度:', outputPixels.length); // 20 * 10 * 4 = 800
+
+            // 打印第一个像素 (应该是纯黑)
+            console.log(`第一个像素 (0,0): [${outputPixels[0]}, ${outputPixels[1]}, ${outputPixels[2]}, ${outputPixels[3]}]`);
+            // 打印中间某个插值像素 (大约在第10列，原始第4列和第5列之间)
+            // 原始第4列: R=113, 原始第5列: R=142。插值结果应该是 (113+142)/2 = 127.5 左右
+            const mid_idx = (0 * outputWidth + 9) * 4; // 第10列（索引为9），第0行
+            console.log(`第10列像素 (9,0): [${outputPixels[mid_idx]}, ${outputPixels[mid_idx + 1]}, ${outputPixels[mid_idx + 2]}, ${outputPixels[mid_idx + 3]}]`);
+
+            // 打印最后一个像素 (应该是纯红)
+            const last_idx = (outputPixels.length) - 4;
+            console.log(`最后一个像素 (19,9): [${outputPixels[last_idx]}, ${outputPixels[last_idx + 1]}, ${outputPixels[last_idx + 2]}, ${outputPixels[last_idx + 3]}]`);
+
+            // 你现在得到的 `outputPixels` 就是你想要的 20 * 10 * 4 的数组
+            // 可以直接用于后续计算
+
+            // 清理资源
+            app.destroy(false, true); // 销毁应用，但不移除canvas，并销毁纹理
+
+        })();
+    </script>
+</body>
+
+</html>

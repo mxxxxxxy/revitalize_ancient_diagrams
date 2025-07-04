@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL 10列到20列线性插值</title>
+    <style>
+        body { background-color: #333; color: #eee; font-family: sans-serif; text-align: center; }
+        canvas { 
+            background-color: #555; 
+            /* 为了方便观察，我们用CSS把微小的Canvas放大 */
+            image-rendering: pixelated; /* 保持像素感，不模糊 */
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            width: 400px;
+            height: 200px;
+            border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebGL: 10列像素 -> 20列（线性插值）</h1>
+    <canvas id="webgl-canvas"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        // 顶点着色器
+        attribute vec2 a_position; // 接收顶点位置
+        attribute vec2 a_texCoord; // 接收纹理坐标
+        
+        varying vec2 v_texCoord;   // 将纹理坐标传递给片元着色器
+        
+        void main() {
+            // 直接将顶点位置输出，因为我们的矩形已经是裁剪空间坐标了
+            gl_Position = vec4(a_position, 0.0, 1.0);
+            
+            // 将纹理坐标传递下去
+            v_texCoord = a_texCoord;
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        // 片元着色器
+        precision mediump float; // 设置浮点数精度
+        
+        uniform sampler2D u_texture; // 接收我们的原始10列像素纹理
+        varying vec2 v_texCoord;     // 从顶点着色器接收插值后的纹理坐标
+        
+        void main() {
+            // 核心！GPU自动根据坐标(v_texCoord)从纹理(u_texture)中采样颜色。
+            // 由于我们设置了线性插值，当坐标落在像素之间时，GPU会自动混合颜色。
+            gl_FragColor = texture2D(u_texture, v_texCoord);
+        }
+    </script>
+
+    <script>
+        function main() {
+            // 1. 初始化
+            const canvas = document.getElementById('webgl-canvas');
+            const gl = canvas.getContext('webgl');
+            if (!gl) {
+                alert('无法初始化WebGL。您的浏览器或机器可能不支持。');
+                return;
+            }
+
+            // --- 目标尺寸 ---
+            const newWidth = 20;
+            const newHeight = 10;
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+
+            // 2. 创建原始数据 (10x10 像素)
+            // 你可以替换这里为你自己的10列像素数据
+            const originalWidth = 10;
+            const originalHeight = 10;
+            const originalPixelData = new Uint8ClampedArray(originalWidth * originalHeight * 4);
+            for (let y = 0; y < originalHeight; y++) {
+                for (let x = 0; x < originalWidth; x++) {
+                    const i = (y * originalWidth + x) * 4;
+                    const intensity = x / (originalWidth - 1); // 从 0.0 到 1.0 的强度
+                    originalPixelData[i] = intensity * 255; // R
+                    originalPixelData[i + 1] = 0;           // G
+                    originalPixelData[i + 2] = 0;           // B
+                    originalPixelData[i + 3] = 255;         // A
+                }
+            }
+            const originalImageData = new ImageData(originalPixelData, originalWidth, originalHeight);
+
+
+            // 3. 编译和链接着色器
+            const vsSource = document.getElementById('vertex-shader').textContent;
+            const fsSource = document.getElementById('fragment-shader').textContent;
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+            // 4. 获取着色器中的变量位置
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'a_position'),
+                    textureCoord: gl.getAttribLocation(shaderProgram, 'a_texCoord'),
+                },
+                uniformLocations: {
+                    uSampler: gl.getUniformLocation(shaderProgram, 'u_texture'),
+                },
+            };
+
+            // 5. 设置用于绘制的几何体（一个覆盖全画布的矩形）
+            const buffers = initBuffers(gl);
+
+            // 6. 创建并设置纹理 (这是关键步骤!)
+            const texture = createAndSetupTexture(gl, originalImageData);
+
+            // 7. 绘制场景
+            drawScene(gl, programInfo, buffers, texture);
+        }
+
+        // --- WebGL 辅助函数 ---
+
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                alert('无法初始化着色器程序: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert('编译着色器时出错: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function initBuffers(gl) {
+            // 创建一个矩形，覆盖从 (-1,-1) 到 (1,1) 的整个裁剪空间
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            const positions = [
+                -1.0,  1.0, // 左上
+                 1.0,  1.0, // 右上
+                -1.0, -1.0, // 左下
+                 1.0, -1.0, // 右下
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            // 纹理坐标也需要对应矩形的四个角
+            const textureCoordBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordBuffer);
+            const textureCoordinates = [
+                0.0,  0.0, // 左上 -> 对应纹理(0,0)
+                1.0,  0.0, // 右上 -> 对应纹理(1,0)
+                0.0,  1.0, // 左下 -> 对应纹理(0,1)
+                1.0,  1.0, // 右下 -> 对应纹理(1,1)
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoordinates), gl.STATIC_DRAW);
+            
+            // 用索引来指明如何用顶点画出两个三角形组成矩形
+            const indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            const indices = [0, 2, 1, 1, 2, 3];
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+            return {
+                position: positionBuffer,
+                textureCoord: textureCoordBuffer,
+                indices: indexBuffer,
+            };
+        }
+
+        function createAndSetupTexture(gl, imageData) {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+
+            // 将ImageData上传到GPU纹理
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
+
+            // === 这是回答你问题的核心设置 ===
+            // 1. 如何处理放大 (MAG_FILTER): 从10像素放大到20像素
+            //    gl.LINEAR -> 使用线性插值（平滑过渡，高质量）
+            //    gl.NEAREST -> 使用近邻采样（块状，低质量）
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            
+            // 设置缩小，以防万一
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+            // 2. 如何处理收尾 (TEXTURE_WRAP): 纹理坐标超出 [0,1] 范围时怎么办
+            //    gl.CLAMP_TO_EDGE -> 将坐标“夹紧”到边缘，像素来自边缘。完美解决“收尾不相接”。
+            //    gl.REPEAT -> 循环采样
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); // S = 横轴
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); // T = 纵轴
+
+            return texture;
+        }
+
+        function drawScene(gl, programInfo, buffers, texture) {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(programInfo.program);
+
+            // 告诉WebGL如何从缓冲区中取出顶点位置
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+            // 告诉WebGL如何从缓冲区中取出纹理坐标
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.textureCoord);
+            gl.vertexAttribPointer(programInfo.attribLocations.textureCoord, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.textureCoord);
+            
+            // 绑定索引缓冲
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
+
+            // 激活0号纹理单元，并绑定我们的纹理
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            // 告诉着色器 u_texture 这个 uniform 变量使用0号纹理单元
+            gl.uniform1i(programInfo.uniformLocations.uSampler, 0);
+
+            // 执行绘制！
+            const vertexCount = 6; // 6个顶点组成两个三角形
+            const type = gl.UNSIGNED_SHORT;
+            const offset = 0;
+            gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
+        }
+
+        // 启动程序
+        main();
+
+    </script>
+</body>
+</html>

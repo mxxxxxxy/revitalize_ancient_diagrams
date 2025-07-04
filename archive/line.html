@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,20 +14,23 @@
             height: 100vh;
             margin: 0;
         }
+
         canvas {
             border: 1px solid #ccc;
             background-color: #fff;
         }
+
         /* 隐藏用于加载的原始图片 */
         #brush-source {
             display: none;
         }
     </style>
 </head>
+
 <body>
     <canvas id="myCanvas" width="800" height="600"></canvas>
     <!-- 确保 crossOrigin="anonymous" 属性存在，否则无法用 getImageData -->
-    <img id="brush-source" src="brush2.png" crossOrigin="anonymous" alt="Brush Source Image">
+    <img id="brush-source" src="brush1.png" crossOrigin="anonymous" alt="Brush Source Image">
 
     <script>
         window.onload = () => {
@@ -148,7 +152,7 @@
             // 使用 Path2D API 来处理 SVG 路径，更现代和方便
             // 注意：Path2D 的 getPointAtLength 方法在某些非常旧的浏览器中可能不被支持
             const path = new Path2D(pathData);
-            
+
             // 为了计算路径上点的属性，我们需要一个在DOM中的SVG元素
             const svgNS = "http://www.w3.org/2000/svg";
             const svgEl = document.createElementNS(svgNS, 'svg');
@@ -194,4 +198,5 @@
 
     </script>
 </body>
+
 </html>
